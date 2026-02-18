@@ -16,7 +16,7 @@ export default function Admin() {
   async function salvar() {
 
     const { error } = await supabase
-      .from('imoveis')
+      .from('moveis')
       .insert([
         {
           titulo: titulo,
