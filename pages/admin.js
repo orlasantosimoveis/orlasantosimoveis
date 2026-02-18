@@ -74,6 +74,19 @@ export default function Admin() {
       <br/><br/>
 
       <strong>{mensagem}</strong>
+          async function salvar() {
+  const { data, error } = await supabase
+    .from('moveis')
+    .insert([{ titulo, cidade, valor }])
+    .select();
+
+  if (error) {
+    alert('Erro ao salvar: ' + error.message);
+    return;
+  }
+  alert('Imóvel salvo com sucesso!');
+}
+
 
     </div>
   )
