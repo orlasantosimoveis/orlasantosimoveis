@@ -7,48 +7,75 @@ const supabase = createClient(
 )
 
 export default function Admin() {
+
   const [titulo, setTitulo] = useState('')
   const [cidade, setCidade] = useState('')
   const [valor, setValor] = useState('')
+  const [mensagem, setMensagem] = useState('')
 
   async function salvar() {
+
     const { error } = await supabase
       .from('imoveis')
-      .insert([{ titulo, cidade, valor }])
+      .insert([
+        {
+          titulo: titulo,
+          cidade: cidade,
+          valor: valor
+        }
+      ])
 
     if (error) {
-      alert('Erro ao salvar')
+      setMensagem("Erro ao salvar: " + error.message)
     } else {
-      alert('Imóvel salvo com sucesso')
+      setMensagem("Imóvel salvo com sucesso!")
+      setTitulo('')
+      setCidade('')
+      setValor('')
     }
+
   }
 
   return (
-    <div style={{padding:40}}>
+    <div style={{padding:40, fontFamily:'Arial'}}>
+
       <h1>Painel Admin - Orla Santos Imóveis</h1>
+
+      <br/>
 
       <input
         placeholder="Título"
         value={titulo}
         onChange={(e)=>setTitulo(e.target.value)}
-      /><br/><br/>
+      />
+
+      <br/><br/>
 
       <input
         placeholder="Cidade"
         value={cidade}
         onChange={(e)=>setCidade(e.target.value)}
-      /><br/><br/>
+      />
+
+      <br/><br/>
 
       <input
         placeholder="Valor"
         value={valor}
         onChange={(e)=>setValor(e.target.value)}
-      /><br/><br/>
+      />
+
+      <br/><br/>
 
       <button onClick={salvar}>
         Salvar imóvel
       </button>
+
+      <br/><br/>
+
+      <strong>{mensagem}</strong>
+
     </div>
   )
-}
 
+}
