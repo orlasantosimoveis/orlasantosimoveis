@@ -15,9 +15,23 @@ export default function Admin() {
   async function salvar() {
     setMensagem('Salvando...')
 
-    const { data, error } = await supabase
-      .from('imoveis')
-      .insert([{ titulo, cidade, valor: Number(valor) }])
+   const codigoGerado = "IMV-" + Date.now();
+
+const { error } = await supabase
+  .from('imoveis')
+  .insert([{
+    codigo: codigoGerado,
+    titulo,
+    cidade,
+    valor: Number(valor) || null
+  }]);
+
+if (error) {
+  alert('Erro ao salvar: ' + error.message);
+} else {
+  alert('Imóvel salvo com sucesso! Código: ' + codigoGerado);
+}
+
       .select()
 
     if (error) {
