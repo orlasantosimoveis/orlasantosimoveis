@@ -16,7 +16,7 @@ export default function Admin() {
     setMensagem('Salvando...')
 
     const { data, error } = await supabase
-      .from('moveis')
+      .from('imoveis')
       .insert([{ titulo, cidade, valor: Number(valor) }])
       .select()
 
