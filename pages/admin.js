@@ -7,88 +7,59 @@ const supabase = createClient(
 )
 
 export default function Admin() {
-
   const [titulo, setTitulo] = useState('')
   const [cidade, setCidade] = useState('')
   const [valor, setValor] = useState('')
   const [mensagem, setMensagem] = useState('')
 
   async function salvar() {
+    setMensagem('Salvando...')
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('moveis')
-      .insert([
-        {
-          titulo: titulo,
-          cidade: cidade,
-          valor: valor
-        }
-      ])
+      .insert([{ titulo, cidade, valor: Number(valor) }])
+      .select()
 
     if (error) {
-      setMensagem("Erro ao salvar: " + error.message)
-    } else {
-      setMensagem("Imóvel salvo com sucesso!")
-      setTitulo('')
-      setCidade('')
-      setValor('')
+      setMensagem('Erro ao salvar: ' + error.message)
+      return
     }
 
+    setMensagem('Imóvel salvo com sucesso! ID: ' + data?.[0]?.id)
+    setTitulo('')
+    setCidade('')
+    setValor('')
   }
 
   return (
-    <div style={{padding:40, fontFamily:'Arial'}}>
-
+    <div style={{ padding: 40, fontFamily: 'Arial' }}>
       <h1>Painel Admin - Orla Santos Imóveis</h1>
-
-      <br/>
 
       <input
         placeholder="Título"
         value={titulo}
-        onChange={(e)=>setTitulo(e.target.value)}
+        onChange={(e) => setTitulo(e.target.value)}
       />
-
-      <br/><br/>
+      <br /><br />
 
       <input
         placeholder="Cidade"
         value={cidade}
-        onChange={(e)=>setCidade(e.target.value)}
+        onChange={(e) => setCidade(e.target.value)}
       />
-
-      <br/><br/>
+      <br /><br />
 
       <input
-        placeholder="Valor"
+        placeholder="Valor (ex: 700000)"
         value={valor}
-        onChange={(e)=>setValor(e.target.value)}
+        onChange={(e) => setValor(e.target.value)}
       />
+      <br /><br />
 
-      <br/><br/>
+      <button onClick={salvar}>Salvar imóvel</button>
 
-      <button onClick={salvar}>
-        Salvar imóvel
-      </button>
-
-      <br/><br/>
-
+      <br /><br />
       <strong>{mensagem}</strong>
-          async function salvar() {
-  const { data, error } = await supabase
-    .from('moveis')
-    .insert([{ titulo, cidade, valor }])
-    .select();
-
-  if (error) {
-    alert('Erro ao salvar: ' + error.message);
-    return;
-  }
-  alert('Imóvel salvo com sucesso!');
-}
-
-
     </div>
   )
-
 }
