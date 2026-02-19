@@ -459,10 +459,3 @@ const tdMono = {
   fontSize: 12,
   whiteSpace: "nowrap",
 };
-
-
-
-      <button onClick={salvar}>Salvar imóvel</button>
-    </div>
-  );
-}
