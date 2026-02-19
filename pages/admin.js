@@ -17,6 +17,7 @@ function brl(v) {
 const STATUS_OPCOES = ["disponivel", "reservado", "vendido", "inativo"];
 
 export default function Admin() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -68,9 +69,25 @@ export default function Admin() {
     setItens(data || []);
   }
 
-  useEffect(() => {
+ useEffect(() => {
+
+  async function verificarLogin() {
+
+    const { data } = await supabase.auth.getUser();
+
+    if (!data.user) {
+      router.push("/login");
+      return;
+    }
+
     carregar();
-  }, []);
+
+  }
+
+  verificarLogin();
+
+}, []);
+
 
   function onChange(name, value) {
     setForm((p) => ({ ...p, [name]: value }));
