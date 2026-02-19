@@ -17,17 +17,19 @@ export default function Login() {
 
   async function entrar() {
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: senha
-    });
+   const { error } = await supabase.auth.signInWithPassword({
+  email,
+  password: senha,
+});
 
-    if (error) {
-      setMsg(error.message);
-      return;
-    }
+if (error) {
+  setMsg(error.message);
+  return;
+}
 
-    router.push("/admin");
+// garante que a sessão foi salva antes de ir pro admin
+await supabase.auth.getSession();
+router.replace("/admin");
 
   }
 
