@@ -69,24 +69,17 @@ export default function Admin() {
     setItens(data || []);
   }
 
- useEffect(() => {
-
-  async function verificarLogin() {
-
+useEffect(() => {
+  (async () => {
     const { data } = await supabase.auth.getUser();
-
     if (!data.user) {
       router.push("/login");
       return;
     }
-
     carregar();
-
-  }
-
-  verificarLogin();
-
+  })();
 }, []);
+
 
 
   function onChange(name, value) {
