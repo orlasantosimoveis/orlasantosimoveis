@@ -71,15 +71,35 @@ export default function Admin() {
   }
 
 useEffect(() => {
+  let unsub = null;
+
   (async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) {
-      router.push("/login");
+    // 1) tenta pegar a sessão (mais rápido e confiável)
+    const { data: sess } = await supabase.auth.getSession();
+
+    if (!sess?.session) {
+      // 2) se não tem sessão ainda, espera mudança de auth (login)
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!session) {
+          router.replace("/login");
+          return;
+        }
+        carregar();
+      });
+      unsub = data?.subscription;
+      router.replace("/login");
       return;
     }
+
+    // tem sessão -> carrega
     carregar();
   })();
-}, []);
+
+  return () => {
+    if (unsub) unsub.unsubscribe();
+  };
+}, [router]);
+
 
 
 
