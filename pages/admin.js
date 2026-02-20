@@ -264,6 +264,8 @@ useEffect(() => {
   return (
     <div style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 1100, margin: "0 auto" }}>
       <h1 style={{ marginBottom: 6 }}>Painel Admin — Orla Santos Imóveis</h1>
+        <div>Logado como: <b>{usuarioNome || "..."}</b></div>
+
       <div style={{ color: "#444", marginBottom: 16 }}>
         {loading ? "Carregando..." : "Pronto."}{" "}
         {msg ? <span style={{ marginLeft: 10, fontWeight: 700 }}>{msg}</span> : null}
