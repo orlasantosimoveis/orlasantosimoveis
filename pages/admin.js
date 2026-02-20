@@ -71,9 +71,25 @@ export default function Admin() {
   }
 
   useEffect(() => {
-    carregarUsuario();
-    carregarImoveis();
-  }, []);
+
+  async function iniciar() {
+
+    const { data } = await supabase.auth.getUser();
+
+    if (!data?.user) {
+
+      window.location.href = "/login";
+      return;
+    }
+
+    await carregarUsuario();
+    await carregarImoveis();
+  }
+
+  iniciar();
+
+}, []);
+
 
   async function salvar(e) {
 
