@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/router";
 import { createClient } from "@supabase/supabase-js";
 
@@ -11,53 +11,54 @@ export default function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data?.session) router.replace("/admin");
-    });
-  }, [router]);
 
   async function entrar(e) {
     e.preventDefault();
     setMsg("");
+    setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password: senha,
     });
 
-    if (error) return setMsg("Erro: " + error.message);
+    setLoading(false);
+
+    if (error) {
+      setMsg("Erro: " + error.message);
+      return;
+    }
 
     router.push("/admin");
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: "60px auto", fontFamily: "Arial" }}>
+    <div style={{ maxWidth: 420, margin: "40px auto", fontFamily: "Arial, sans-serif" }}>
       <h1>Login</h1>
 
+      {msg ? <div style={{ marginBottom: 12, fontWeight: 700 }}>{msg}</div> : null}
+
       <form onSubmit={entrar} style={{ display: "grid", gap: 10 }}>
-        <input
-          placeholder="E-mail"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          placeholder="Senha"
-          type="password"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
-        />
-        <button type="submit">Entrar</button>
+        <label>
+          E-mail<br />
+          <input value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: "100%", padding: 10 }} />
+        </label>
+
+        <label>
+          Senha<br />
+          <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} style={{ width: "100%", padding: 10 }} />
+        </label>
+
+        <button disabled={loading} style={{ padding: 12 }}>
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+
+        <button type="button" onClick={() => router.push("/signup")} style={{ padding: 12 }}>
+          Criar usuário
+        </button>
       </form>
-
-      {msg ? <p style={{ color: "crimson" }}>{msg}</p> : null}
-
-      <p style={{ marginTop: 16 }}>
-        Não tem usuário?{" "}
-        <a href="/signup">Cadastrar usuário</a>
-      </p>
     </div>
   );
 }
