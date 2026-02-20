@@ -2,35 +2,31 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const supabase =
+  SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const STATUS_OPCOES = ["disponivel", "reservado", "vendido", "inativo"];
 
 function brl(v) {
-  if (v == null || v === "") return "-";
   const n = Number(v);
-  if (Number.isNaN(n)) return String(v);
+  if (Number.isNaN(n)) return v ?? "";
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function gerarCodigo() {
-  return "IMV-" + Date.now();
 }
 
 export default function Admin() {
   const router = useRouter();
 
+  const [boot, setBoot] = useState("iniciando"); // iniciando | ok | erro
+  const [bootMsg, setBootMsg] = useState("Iniciando...");
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
 
-  const [usuarioId, setUsuarioId] = useState("");
-  const [usuarioNome, setUsuarioNome] = useState("");
-
+  const [perfil, setPerfil] = useState(null);
+  const [captadores, setCaptadores] = useState([]);
+  const [proprietarios, setProprietarios] = useState([]);
   const [itens, setItens] = useState([]);
-  const [nomesUsuarios, setNomesUsuarios] = useState({});
 
   const [filtroTexto, setFiltroTexto] = useState("");
   const [filtroStatus, setFiltroStatus] = useState("");
@@ -42,279 +38,240 @@ export default function Admin() {
     cidade: "",
     bairro: "",
     endereco: "",
-    descricao: "",
     status: "disponivel",
+    proprietario_id: "",
+    captador_id: "",
   });
 
   function onChange(name, value) {
     setForm((p) => ({ ...p, [name]: value }));
   }
 
-  // ---------------------------
-  // Auth + Boot
-  // ---------------------------
+  function gerarCodigo() {
+    return "IMV-" + Date.now();
+  }
+
+  // BOOT: valida env + session + perfil
   useEffect(() => {
-    let unsub = null;
+    let alive = true;
 
     (async () => {
-      setMsg("");
-      setLoading(true);
+      try {
+        if (!supabase) {
+          if (!alive) return;
+          setBoot("erro");
+          setBootMsg(
+            "ERRO: Variáveis NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY não estão configuradas na Vercel."
+          );
+          return;
+        }
 
-      // 1) sessão (mais confiável)
-      const { data: sess } = await supabase.auth.getSession();
-      const session = sess?.session;
+        if (!alive) return;
+        setBootMsg("Checando sessão (login)...");
 
-      if (!session) {
-        // escuta login e manda pro /login
-        const { data } = supabase.auth.onAuthStateChange((_event, newSession) => {
-          if (!newSession) {
-            router.replace("/login");
-            return;
-          }
-          // se logou agora, recarrega a página do admin
-          window.location.reload();
-        });
-        unsub = data?.subscription;
-        setLoading(false);
-        router.replace("/login");
-        return;
+        const { data: sessData, error: sessErr } = await supabase.auth.getSession();
+
+        if (sessErr) {
+          if (!alive) return;
+          setBoot("erro");
+          setBootMsg("Erro ao pegar sessão: " + sessErr.message);
+          return;
+        }
+
+        const session = sessData?.session;
+        const user = session?.user;
+
+        if (!user) {
+          // não logado
+          router.replace("/login");
+          return;
+        }
+
+        if (!alive) return;
+        setBootMsg("Buscando seu perfil na tabela usuarios...");
+
+        const uid = user.id;
+
+        const { data: perfilDb, error: perfilErr } = await supabase
+          .from("usuarios")
+          .select("id, auth_uid, nome, email, tipo")
+          .eq("auth_uid", uid)
+          .maybeSingle();
+
+        // Se não tem perfil, ainda assim deixa entrar (mas avisa)
+        const finalPerfil =
+          perfilDb ||
+          ({
+            id: null,
+            auth_uid: uid,
+            nome: user.email,
+            email: user.email,
+            tipo: "corretor",
+          });
+
+        if (!alive) return;
+        setPerfil(finalPerfil);
+
+        if (perfilErr) {
+          // pode ser RLS ou tabela/coluna
+          setBootMsg("Aviso: não consegui ler 'usuarios': " + perfilErr.message);
+        } else if (!perfilDb) {
+          setBootMsg("Aviso: seu perfil não existe em 'usuarios'. Crie em /signup.");
+        } else {
+          setBootMsg("OK.");
+        }
+
+        if (!alive) return;
+        setBoot("ok");
+      } catch (e) {
+        if (!alive) return;
+        setBoot("erro");
+        setBootMsg("Falha inesperada no boot: " + (e?.message || String(e)));
       }
-
-      const user = session.user;
-      setUsuarioId(user.id);
-
-      // tenta buscar nome do usuário na tabela public.usuarios
-      const { data: perfil, error: perfilErr } = await supabase
-        .from("usuarios")
-        .select("nome")
-        .eq("id", user.id)
-        .single();
-
-      // fallback pro email, caso não exista perfil ainda
-      if (!perfilErr && perfil?.nome) setUsuarioNome(perfil.nome);
-      else setUsuarioNome(user.email || "Usuário");
-
-      await carregarImoveis();
-
-      setLoading(false);
     })();
 
     return () => {
-      if (unsub) unsub.unsubscribe();
+      alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Carrega combos e imóveis
+  useEffect(() => {
+    if (boot !== "ok" || !perfil || !supabase) return;
+
+    (async () => {
+      try {
+        setLoading(true);
+
+        const { data: users } = await supabase
+          .from("usuarios")
+          .select("id,nome,tipo")
+          .order("nome", { ascending: true });
+
+        setCaptadores(users || []);
+
+        const { data: props } = await supabase
+          .from("proprietarios")
+          .select("id,nome")
+          .order("nome", { ascending: true });
+
+        setProprietarios(props || []);
+
+        const { data: imvs } = await supabase
+          .from("imoveis")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        setItens(imvs || []);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [boot, perfil]);
+
   async function sair() {
+    if (!supabase) return;
     await supabase.auth.signOut();
-    router.push("/login");
+    router.replace("/login");
   }
 
-  // ---------------------------
-  // Carregar imóveis + mapear nomes
-  // ---------------------------
-  async function carregarImoveis() {
-    const { data, error } = await supabase
-      .from("imoveis")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      setMsg("Erro ao carregar imóveis: " + error.message);
-      setItens([]);
-      return;
-    }
-
-    const lista = data || [];
-    setItens(lista);
-
-    // montar mapa (uuid -> nome) para "cadastrado_por_uuid"
-    const ids = Array.from(
-      new Set(lista.map((x) => x.cadastrado_por_uuid).filter(Boolean))
-    );
-
-    if (ids.length === 0) {
-      setNomesUsuarios({});
-      return;
-    }
-
-    const { data: users, error: e2 } = await supabase
-      .from("usuarios")
-      .select("id,nome")
-      .in("id", ids);
-
-    if (e2) {
-      // não quebra a página, só não mostra nomes
-      setMsg((m) => (m ? m + " | " : "") + "Aviso usuários: " + e2.message);
-      setNomesUsuarios({});
-      return;
-    }
-
-    const map = {};
-    (users || []).forEach((u) => {
-      map[u.id] = u.nome;
-    });
-    setNomesUsuarios(map);
-  }
-
-  // ---------------------------
-  // CRUD
-  // ---------------------------
   async function salvar(e) {
     e.preventDefault();
-    setMsg("");
+    if (!supabase) return;
 
-    if (!form.titulo?.trim()) {
-      setMsg("Preencha o Título.");
+    if (!form.titulo.trim()) {
+      alert("Preencha o título.");
       return;
     }
 
     setLoading(true);
+    try {
+      const payload = {
+        codigo: gerarCodigo(),
+        titulo: form.titulo.trim(),
+        tipo: form.tipo.trim() || null,
+        valor: form.valor === "" ? null : Number(form.valor),
+        cidade: form.cidade.trim() || null,
+        bairro: form.bairro.trim() || null,
+        endereco: form.endereco.trim() || null,
+        status: form.status || "disponivel",
 
-    // garante sessão
-    const { data: sess } = await supabase.auth.getSession();
-    const session = sess?.session;
-    if (!session) {
+        // int (combo)
+        proprietario_id: form.proprietario_id ? Number(form.proprietario_id) : null,
+        captador_id: form.captador_id ? Number(form.captador_id) : null,
+
+        // automático
+        cadastrado_por: perfil?.nome || perfil?.email || "usuário",
+      };
+
+      const { error } = await supabase.from("imoveis").insert([payload]);
+      if (error) {
+        alert("Erro ao salvar: " + error.message);
+        return;
+      }
+
+      alert("Imóvel salvo!");
+      setForm((p) => ({ ...p, titulo: "", tipo: "", valor: "", cidade: "", bairro: "", endereco: "" }));
+
+      const { data: imvs } = await supabase
+        .from("imoveis")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      setItens(imvs || []);
+    } finally {
       setLoading(false);
-      router.replace("/login");
-      return;
     }
-
-    const payload = {
-      codigo: gerarCodigo(),
-      titulo: form.titulo.trim(),
-      tipo: form.tipo?.trim() || null,
-      valor: form.valor === "" ? null : Number(form.valor),
-      cidade: form.cidade?.trim() || null,
-      bairro: form.bairro?.trim() || null,
-      endereco: form.endereco?.trim() || null,
-      descricao: form.descricao?.trim() || null,
-      status: form.status || "disponivel",
-
-      // ✅ aqui é o correto (UUID)
-      cadastrado_por_uuid: session.user.id,
-    };
-
-    const { error } = await supabase.from("imoveis").insert([payload]);
-
-    setLoading(false);
-
-    if (error) {
-      setMsg("Erro ao salvar: " + error.message);
-      return;
-    }
-
-    setMsg("Imóvel salvo com sucesso!");
-    setForm((p) => ({
-      ...p,
-      titulo: "",
-      tipo: "",
-      valor: "",
-      cidade: "",
-      bairro: "",
-      endereco: "",
-      descricao: "",
-      status: "disponivel",
-    }));
-
-    await carregarImoveis();
   }
 
-  async function excluir(id) {
-    if (!confirm("Tem certeza que deseja excluir este imóvel?")) return;
-
-    setLoading(true);
-    setMsg("");
-
-    const { error } = await supabase.from("imoveis").delete().eq("id", id);
-
-    setLoading(false);
-
-    if (error) {
-      setMsg("Erro ao excluir: " + error.message);
-      return;
-    }
-
-    setMsg("Imóvel excluído.");
-    await carregarImoveis();
-  }
-
-  async function mudarStatus(id, novoStatus) {
-    setLoading(true);
-    setMsg("");
-
-    const { error } = await supabase
-      .from("imoveis")
-      .update({ status: novoStatus })
-      .eq("id", id);
-
-    setLoading(false);
-
-    if (error) {
-      setMsg("Erro ao atualizar status: " + error.message);
-      return;
-    }
-
-    setMsg("Status atualizado para: " + novoStatus);
-    await carregarImoveis();
-  }
-
-  // ---------------------------
-  // Filtros
-  // ---------------------------
   const itensFiltrados = useMemo(() => {
     const t = filtroTexto.trim().toLowerCase();
     return (itens || []).filter((x) => {
       const okStatus = filtroStatus ? (x.status || "").toLowerCase() === filtroStatus : true;
       if (!t) return okStatus;
 
-      const blob = [
-        x.codigo,
-        x.titulo,
-        x.tipo,
-        x.cidade,
-        x.bairro,
-        x.endereco,
-        x.descricao,
-        x.status,
-        nomesUsuarios[x.cadastrado_por_uuid],
-      ]
+      const blob = [x.codigo, x.titulo, x.tipo, x.cidade, x.bairro, x.endereco, x.status]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
 
       return okStatus && blob.includes(t);
     });
-  }, [itens, filtroTexto, filtroStatus, nomesUsuarios]);
+  }, [itens, filtroTexto, filtroStatus]);
 
-  // ---------------------------
-  // UI
-  // ---------------------------
-  return (
-    <div style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ marginBottom: 6 }}>Painel Admin — Orla Santos Imóveis</h1>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-        <div>
-          <b>Logado como:</b> {usuarioNome || "..."}
-        </div>
-
-        <button onClick={() => router.push("/signup")} disabled={loading}>
-          Cadastrar usuário
-        </button>
-
-        <button onClick={sair} disabled={loading}>
-          Sair
-        </button>
-
-        <div style={{ marginLeft: "auto", color: "#555" }}>
-          {loading ? "Carregando..." : "Pronto."}{" "}
-          {msg ? <span style={{ marginLeft: 10, fontWeight: 700 }}>{msg}</span> : null}
+  // UI BOOT
+  if (boot !== "ok") {
+    return (
+      <div style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 900, margin: "0 auto" }}>
+        <h1>Painel Admin — Orla Santos Imóveis</h1>
+        <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 10, marginTop: 10 }}>
+          <b>Status:</b> {boot.toUpperCase()} <br />
+          <b>Detalhe:</b> {bootMsg}
+          <div style={{ marginTop: 10, color: "#666" }}>
+            Se ficar aqui travado, abre o Console (F12) e vai aparecer o erro.
+          </div>
         </div>
       </div>
+    );
+  }
 
-      {/* FORM */}
-      <form onSubmit={salvar} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, marginBottom: 18 }}>
+  // UI OK
+  return (
+    <div style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12 }}>
+        <div>
+          <h1 style={{ marginBottom: 6 }}>Painel Admin — Orla Santos Imóveis</h1>
+          <div style={{ color: "#444" }}>
+            Logado como: <b>{perfil?.nome || perfil?.email}</b> ({perfil?.tipo || "usuário"})
+          </div>
+          <div style={{ color: "#666", marginTop: 6 }}>{bootMsg}</div>
+        </div>
+        <button onClick={sair} style={{ padding: "10px 14px" }}>
+          Sair
+        </button>
+      </div>
+
+      <form onSubmit={salvar} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>Cadastrar imóvel</h2>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
@@ -357,92 +314,76 @@ export default function Admin() {
             <input value={form.endereco} onChange={(e) => onChange("endereco", e.target.value)} style={{ width: "100%" }} />
           </label>
 
-          <label style={{ gridColumn: "span 4" }}>
-            Descrição<br />
-            <textarea value={form.descricao} onChange={(e) => onChange("descricao", e.target.value)} style={{ width: "100%", minHeight: 80 }} />
+          <label>
+            Proprietário<br />
+            <select value={form.proprietario_id} onChange={(e) => onChange("proprietario_id", e.target.value)} style={{ width: "100%" }}>
+              <option value="">Selecione...</option>
+              {proprietarios.map((p) => (
+                <option key={p.id} value={p.id}>{p.nome ?? `ID ${p.id}`}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Captador<br />
+            <select value={form.captador_id} onChange={(e) => onChange("captador_id", e.target.value)} style={{ width: "100%" }}>
+              <option value="">Selecione...</option>
+              {captadores.map((u) => (
+                <option key={u.id} value={u.id}>{u.nome ?? `ID ${u.id}`}</option>
+              ))}
+            </select>
           </label>
         </div>
 
-        <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-          <button type="submit" disabled={loading} style={{ padding: "10px 14px" }}>
+        <div style={{ marginTop: 12 }}>
+          <button disabled={loading} style={{ padding: "10px 14px" }}>
             {loading ? "Salvando..." : "Salvar imóvel"}
-          </button>
-          <button type="button" disabled={loading} onClick={carregarImoveis} style={{ padding: "10px 14px" }}>
-            Recarregar lista
           </button>
         </div>
       </form>
 
-      {/* FILTROS */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16 }}>
         <input
-          placeholder="Buscar por código, título, cidade, bairro, status, cadastrador..."
+          placeholder="Buscar..."
           value={filtroTexto}
           onChange={(e) => setFiltroTexto(e.target.value)}
           style={{ flex: 1, padding: 10 }}
         />
         <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} style={{ padding: 10 }}>
-          <option value="">Todos os status</option>
+          <option value="">Todos</option>
           {STATUS_OPCOES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
       </div>
 
-      {/* LISTA */}
-      <h2 style={{ marginTop: 0 }}>Imóveis cadastrados ({itensFiltrados.length})</h2>
-
+      <h2>Imóveis ({itensFiltrados.length})</h2>
       <div style={{ overflowX: "auto", border: "1px solid #ddd", borderRadius: 10 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#f6f6f6" }}>
               <th style={th}>Código</th>
               <th style={th}>Título</th>
-              <th style={th}>Tipo</th>
               <th style={th}>Cidade</th>
               <th style={th}>Bairro</th>
               <th style={th}>Valor</th>
               <th style={th}>Status</th>
-              <th style={th}>Cadastrado por</th>
-              <th style={th}>Ações</th>
             </tr>
           </thead>
-
           <tbody>
             {itensFiltrados.map((x) => (
               <tr key={x.id}>
                 <td style={tdMono}>{x.codigo}</td>
                 <td style={td}>{x.titulo}</td>
-                <td style={td}>{x.tipo || "-"}</td>
                 <td style={td}>{x.cidade || "-"}</td>
                 <td style={td}>{x.bairro || "-"}</td>
                 <td style={td}>{x.valor != null ? brl(x.valor) : "-"}</td>
                 <td style={td}>{x.status || "-"}</td>
-                <td style={td}>{nomesUsuarios[x.cadastrado_por_uuid] || "-"}</td>
-
-                <td style={td}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <select
-                      value={x.status || "disponivel"}
-                      onChange={(e) => mudarStatus(x.id, e.target.value)}
-                      disabled={loading}
-                    >
-                      {STATUS_OPCOES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-
-                    <button onClick={() => excluir(x.id)} disabled={loading} style={{ padding: "6px 10px" }}>
-                      Excluir
-                    </button>
-                  </div>
-                </td>
               </tr>
             ))}
-
             {itensFiltrados.length === 0 ? (
               <tr>
-                <td style={{ padding: 16 }} colSpan={9}>
+                <td style={{ padding: 14 }} colSpan={6}>
                   Nenhum imóvel encontrado.
                 </td>
               </tr>
@@ -450,30 +391,10 @@ export default function Admin() {
           </tbody>
         </table>
       </div>
-
-      <div style={{ marginTop: 14, color: "#666" }}>
-        ✅ Cadastro só para usuários logados. Se quiser, no próximo passo eu fecho o banco (RLS) para impedir inserts sem login.
-      </div>
     </div>
   );
 }
 
-const th = {
-  textAlign: "left",
-  padding: "10px 8px",
-  borderBottom: "1px solid #ddd",
-  whiteSpace: "nowrap",
-};
-
-const td = {
-  padding: "10px 8px",
-  borderBottom: "1px solid #eee",
-  verticalAlign: "top",
-};
-
-const tdMono = {
-  ...td,
-  fontFamily: "monospace",
-  fontSize: 12,
-  whiteSpace: "nowrap",
-};
+const th = { textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #ddd", whiteSpace: "nowrap" };
+const td = { padding: "10px 8px", borderBottom: "1px solid #eee" };
+const tdMono = { ...td, fontFamily: "monospace", fontSize: 12, whiteSpace: "nowrap" };
