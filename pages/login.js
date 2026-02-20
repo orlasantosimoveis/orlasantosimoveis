@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -8,62 +8,56 @@ const supabase = createClient(
 );
 
 export default function Login() {
-
   const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [msg, setMsg] = useState("");
 
-  async function entrar() {
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data?.session) router.replace("/admin");
+    });
+  }, [router]);
 
-   const { error } = await supabase.auth.signInWithPassword({
-  email,
-  password: senha,
-});
+  async function entrar(e) {
+    e.preventDefault();
+    setMsg("");
 
-if (error) {
-  setMsg(error.message);
-  return;
-}
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: senha,
+    });
 
-// garante que a sessão foi salva antes de ir pro admin
-await supabase.auth.getSession();
-router.replace("/admin");
+    if (error) return setMsg("Erro: " + error.message);
 
+    router.push("/admin");
   }
 
   return (
-    <div style={{padding:40}}>
+    <div style={{ maxWidth: 420, margin: "60px auto", fontFamily: "Arial" }}>
+      <h1>Login</h1>
 
-      <h1>Login - Orla Santos Imóveis</h1>
+      <form onSubmit={entrar} style={{ display: "grid", gap: 10 }}>
+        <input
+          placeholder="E-mail"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          placeholder="Senha"
+          type="password"
+          value={senha}
+          onChange={(e) => setSenha(e.target.value)}
+        />
+        <button type="submit">Entrar</button>
+      </form>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e)=>setEmail(e.target.value)}
-      />
+      {msg ? <p style={{ color: "crimson" }}>{msg}</p> : null}
 
-      <br/><br/>
-
-      <input
-        type="password"
-        placeholder="Senha"
-        value={senha}
-        onChange={(e)=>setSenha(e.target.value)}
-      />
-
-      <br/><br/>
-
-      <button onClick={entrar}>
-        Entrar
-      </button>
-
-      <br/><br/>
-
-      {msg}
-
+      <p style={{ marginTop: 16 }}>
+        Não tem usuário?{" "}
+        <a href="/signup">Cadastrar usuário</a>
+      </p>
     </div>
   );
-
 }
