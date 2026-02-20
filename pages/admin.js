@@ -6,7 +6,15 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
+const { data: sess } = await supabase.auth.getSession();
+const session = sess?.session;
 
+if (!session) {
+  setMsg("Você precisa estar logado.");
+  return;
+}
+
+const userId = session.user.id;
 const STATUS_OPCOES = ["disponivel", "reservado", "vendido", "inativo"];
 
 function brl(v) {
