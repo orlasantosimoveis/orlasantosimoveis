@@ -149,20 +149,18 @@ export default function Admin() {
     }
 
     setLoading(true);
-
-    const { error } = await supabase
-      .from("imoveis")
-      .insert({
-        codigo: gerarCodigo(),
-        titulo: form.titulo,
-        tipo: form.tipo || null,
-        valor: form.valor ? Number(form.valor) : null,
-        cidade: form.cidade || null,
-        bairro: form.bairro || null,
-        endereco: form.endereco || null,
-        status: form.status,
-        cadastradoPorId: usuarioId
-      });
+cadastrado_por_uuid: userId,
+    const { error } = await supabase.from("imoveis").insert({
+  codigo: gerarCodigo(),
+  titulo: form.titulo,
+  tipo: form.tipo || null,
+  valor: form.valor ? Number(form.valor) : null,
+  cidade: form.cidade || null,
+  bairro: form.bairro || null,
+  endereco: form.endereco || null,
+  status: form.status,
+  cadastrado_por_uuid: userId,
+});
 
     setLoading(false);
 
