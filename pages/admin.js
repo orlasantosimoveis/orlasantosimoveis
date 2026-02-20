@@ -6,6 +6,25 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
+const [usuarioNome, setUsuarioNome] = useState("");
+
+useEffect(() => {
+  async function carregarUsuario() {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { data } = await supabase
+      .from("usuarios")
+      .select("nome")
+      .eq("id", user.id)
+      .single();
+
+    if (data) setUsuarioNome(data.nome);
+  }
+
+  carregarUsuario();
+}, []);
 
 // util: formata número em BRL
 function brl(v) {
