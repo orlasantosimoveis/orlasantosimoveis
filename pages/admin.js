@@ -1,3 +1,4 @@
+import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -18,6 +19,8 @@ function brl(v) {
 
 export default function Admin() {
 
+  const router = useRouter();
+const [usuarioNome, setUsuarioNome] = useState("");
   import { useRouter } from "next/router";
 // ... (o resto permanece)
 
@@ -25,35 +28,33 @@ export default function Admin() {
   const router = useRouter();
   const [usuarioNome, setUsuarioNome] = useState("");
 
-  useEffect(() => {
-    async function init() {
-      const { data } = await supabase.auth.getSession();
-      const session = data?.session;
+ useEffect(() => {
+  (async () => {
+    const { data } = await supabase.auth.getSession();
+    const session = data?.session;
 
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      // busca nome na tabela usuarios
-      const userId = session.user.id;
-      const { data: perfil } = await supabase
-        .from("usuarios")
-        .select("nome")
-        .eq("id", userId)
-        .single();
-
-      setUsuarioNome(perfil?.nome || session.user.email || "...");
-      await carregar();
+    if (!session) {
+      router.replace("/login");
+      return;
     }
 
-    init();
-  }, [router]);
+    const userId = session.user.id;
 
-  async function sair() {
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
+    const { data: perfil } = await supabase
+      .from("usuarios")
+      .select("nome")
+      .eq("id", userId)
+      .single();
+
+    setUsuarioNome(perfil?.nome || session.user.email || "...");
+    carregarImoveis(); // ou carregar() dependendo do seu arquivo
+  })();
+}, [router]);
+
+ async function sair() {
+  await supabase.auth.signOut();
+  router.push("/login");
+}
 
   // ... resto do seu código
 
