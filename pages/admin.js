@@ -2,7 +2,6 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const [nomesUsuarios, setNomesUsuarios] = useState({});
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -33,6 +32,7 @@ const [usuarioNome, setUsuarioNome] = useState("");
   import { useRouter } from "next/router";
 // ... (o resto permanece)
 
+  const [nomesUsuarios, setNomesUsuarios] = useState({});
 export default function Admin() {
   const router = useRouter();
   const [usuarioNome, setUsuarioNome] = useState("");
@@ -110,17 +110,44 @@ export default function Admin() {
   }
 
   async function carregarImoveis() {
+  const { data, error } = await supabase
+    .from("imoveis")
+    .select("*")
+    .order("created_at", { ascending: false });
 
-    const { data } = await supabase
-      .from("imoveis")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    setItens(data || []);
+  if (error) {
+    setMsg("Erro ao carregar imóveis: " + error.message);
+    return;
   }
 
-  useEffect(() => {
+  const lista = data || [];
+  setItens(lista);
 
+  // pega os UUIDs únicos de quem cadastrou
+  const ids = Array.from(
+    new Set(lista.map((x) => x.cadastrado_por_uuid).filter(Boolean))
+  );
+
+  if (ids.length === 0) {
+    setNomesUsuarios({});
+    return;
+  }
+
+  // busca nomes na tabela usuarios
+  const { data: users, error: e2 } = await supabase
+    .from("usuarios")
+    .select("id,nome")
+    .in("id", ids);
+
+  if (e2) {
+    setMsg("Erro ao carregar usuários: " + e2.message);
+    return;
+  }
+
+  const map = {};
+  (users || []).forEach((u) => (map[u.id] = u.nome));
+  setNomesUsuarios(map);
+}
   async function iniciar() {
 
     const { data } = await supabase.auth.getUser();
@@ -289,6 +316,7 @@ cadastrado_por_uuid: userId,
 
         <thead>
           <tr>
+          <th>Cadastrado por</th>
             <th>Código</th>
             <th>Título</th>
             <th>Cidade</th>
@@ -299,16 +327,18 @@ cadastrado_por_uuid: userId,
         </thead>
 
         <tbody>
-
+          
+<td>{nomesUsuarios[i.cadastrado_por_uuid] || "-"}</td>
           {itens.map((i) => (
 
             <tr key={i.id}>
-
-              <td>{i.codigo}</td>
-              <td>{i.titulo}</td>
-              <td>{i.cidade}</td>
-              <td>{brl(i.valor)}</td>
-
+  <td>{i.codigo}</td>
+  <td>{i.titulo}</td>
+  <td>{i.cidade}</td>
+  <td>{brl(i.valor)}</td>
+  <td>{nomesUsuarios[i.cadastrado_por_uuid] || "-"}</td>
+  ...
+</tr>
               <td>
 
                 <select
