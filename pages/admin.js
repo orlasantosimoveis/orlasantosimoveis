@@ -1,74 +1,39 @@
-import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
-const { data: sess } = await supabase.auth.getSession();
-const session = sess?.session;
 
-if (!session) {
-  setMsg("Você precisa estar logado.");
-  return;
-}
-
-const userId = session.user.id;
 const STATUS_OPCOES = ["disponivel", "reservado", "vendido", "inativo"];
 
 function brl(v) {
-  if (v == null) return "-";
-  return Number(v).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
+  if (v == null || v === "") return "-";
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function gerarCodigo() {
+  return "IMV-" + Date.now();
 }
 
 export default function Admin() {
-
   const router = useRouter();
-const [usuarioNome, setUsuarioNome] = useState("");
-  import { useRouter } from "next/router";
-// ... (o resto permanece)
 
-  const [nomesUsuarios, setNomesUsuarios] = useState({});
-export default function Admin() {
-  const router = useRouter();
-  const [usuarioNome, setUsuarioNome] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
 
- useEffect(() => {
-  (async () => {
-    const { data } = await supabase.auth.getSession();
-    const session = data?.session;
-
-    if (!session) {
-      router.replace("/login");
-      return;
-    }
-
-    const userId = session.user.id;
-
-    const { data: perfil } = await supabase
-      .from("usuarios")
-      .select("nome")
-      .eq("id", userId)
-      .single();
-
-    setUsuarioNome(perfil?.nome || session.user.email || "...");
-    carregarImoveis(); // ou carregar() dependendo do seu arquivo
-  })();
-}, [router]);
-
- async function sair() {
-  await supabase.auth.signOut();
-  router.push("/login");
-}
-
-  // ... resto do seu código
-
-  const [usuarioNome, setUsuarioNome] = useState("");
   const [usuarioId, setUsuarioId] = useState("");
+  const [usuarioNome, setUsuarioNome] = useState("");
+
+  const [itens, setItens] = useState([]);
+  const [nomesUsuarios, setNomesUsuarios] = useState({});
+
+  const [filtroTexto, setFiltroTexto] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("");
 
   const [form, setForm] = useState({
     titulo: "",
@@ -77,301 +42,438 @@ export default function Admin() {
     cidade: "",
     bairro: "",
     endereco: "",
+    descricao: "",
     status: "disponivel",
   });
 
-  const [itens, setItens] = useState([]);
-  const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  function onChange(nome, valor) {
-    setForm((p) => ({ ...p, [nome]: valor }));
+  function onChange(name, value) {
+    setForm((p) => ({ ...p, [name]: value }));
   }
 
-  function gerarCodigo() {
-    return "IMV-" + Date.now();
+  // ---------------------------
+  // Auth + Boot
+  // ---------------------------
+  useEffect(() => {
+    let unsub = null;
+
+    (async () => {
+      setMsg("");
+      setLoading(true);
+
+      // 1) sessão (mais confiável)
+      const { data: sess } = await supabase.auth.getSession();
+      const session = sess?.session;
+
+      if (!session) {
+        // escuta login e manda pro /login
+        const { data } = supabase.auth.onAuthStateChange((_event, newSession) => {
+          if (!newSession) {
+            router.replace("/login");
+            return;
+          }
+          // se logou agora, recarrega a página do admin
+          window.location.reload();
+        });
+        unsub = data?.subscription;
+        setLoading(false);
+        router.replace("/login");
+        return;
+      }
+
+      const user = session.user;
+      setUsuarioId(user.id);
+
+      // tenta buscar nome do usuário na tabela public.usuarios
+      const { data: perfil, error: perfilErr } = await supabase
+        .from("usuarios")
+        .select("nome")
+        .eq("id", user.id)
+        .single();
+
+      // fallback pro email, caso não exista perfil ainda
+      if (!perfilErr && perfil?.nome) setUsuarioNome(perfil.nome);
+      else setUsuarioNome(user.email || "Usuário");
+
+      await carregarImoveis();
+
+      setLoading(false);
+    })();
+
+    return () => {
+      if (unsub) unsub.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
+
+  async function sair() {
+    await supabase.auth.signOut();
+    router.push("/login");
   }
 
-  async function carregarUsuario() {
-
-    const { data } = await supabase.auth.getUser();
-
-    if (!data?.user) return;
-
-    setUsuarioId(data.user.id);
-
-    const { data: usuario } = await supabase
-      .from("usuarios")
-      .select("nome")
-      .eq("id", data.user.id)
-      .single();
-
-    if (usuario) setUsuarioNome(usuario.nome);
-  }
-
+  // ---------------------------
+  // Carregar imóveis + mapear nomes
+  // ---------------------------
   async function carregarImoveis() {
-  const { data, error } = await supabase
-    .from("imoveis")
-    .select("*")
-    .order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("imoveis")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    setMsg("Erro ao carregar imóveis: " + error.message);
-    return;
-  }
-
-  const lista = data || [];
-  setItens(lista);
-
-  // pega os UUIDs únicos de quem cadastrou
-  const ids = Array.from(
-    new Set(lista.map((x) => x.cadastrado_por_uuid).filter(Boolean))
-  );
-
-  if (ids.length === 0) {
-    setNomesUsuarios({});
-    return;
-  }
-
-  // busca nomes na tabela usuarios
-  const { data: users, error: e2 } = await supabase
-    .from("usuarios")
-    .select("id,nome")
-    .in("id", ids);
-
-  if (e2) {
-    setMsg("Erro ao carregar usuários: " + e2.message);
-    return;
-  }
-
-  const map = {};
-  (users || []).forEach((u) => (map[u.id] = u.nome));
-  setNomesUsuarios(map);
-}
-  async function iniciar() {
-
-    const { data } = await supabase.auth.getUser();
-
-    if (!data?.user) {
-
-      window.location.href = "/login";
+    if (error) {
+      setMsg("Erro ao carregar imóveis: " + error.message);
+      setItens([]);
       return;
     }
 
-    await carregarUsuario();
-    await carregarImoveis();
+    const lista = data || [];
+    setItens(lista);
+
+    // montar mapa (uuid -> nome) para "cadastrado_por_uuid"
+    const ids = Array.from(
+      new Set(lista.map((x) => x.cadastrado_por_uuid).filter(Boolean))
+    );
+
+    if (ids.length === 0) {
+      setNomesUsuarios({});
+      return;
+    }
+
+    const { data: users, error: e2 } = await supabase
+      .from("usuarios")
+      .select("id,nome")
+      .in("id", ids);
+
+    if (e2) {
+      // não quebra a página, só não mostra nomes
+      setMsg((m) => (m ? m + " | " : "") + "Aviso usuários: " + e2.message);
+      setNomesUsuarios({});
+      return;
+    }
+
+    const map = {};
+    (users || []).forEach((u) => {
+      map[u.id] = u.nome;
+    });
+    setNomesUsuarios(map);
   }
 
-  iniciar();
-
-}, []);
-
-
+  // ---------------------------
+  // CRUD
+  // ---------------------------
   async function salvar(e) {
-
     e.preventDefault();
+    setMsg("");
 
-    if (!form.titulo) {
-      setMsg("Digite o título");
+    if (!form.titulo?.trim()) {
+      setMsg("Preencha o Título.");
       return;
     }
 
     setLoading(true);
-cadastrado_por_uuid: userId,
-    const { error } = await supabase.from("imoveis").insert({
-  codigo: gerarCodigo(),
-  titulo: form.titulo,
-  tipo: form.tipo || null,
-  valor: form.valor ? Number(form.valor) : null,
-  cidade: form.cidade || null,
-  bairro: form.bairro || null,
-  endereco: form.endereco || null,
-  status: form.status,
-  cadastrado_por_uuid: userId,
-});
+
+    // garante sessão
+    const { data: sess } = await supabase.auth.getSession();
+    const session = sess?.session;
+    if (!session) {
+      setLoading(false);
+      router.replace("/login");
+      return;
+    }
+
+    const payload = {
+      codigo: gerarCodigo(),
+      titulo: form.titulo.trim(),
+      tipo: form.tipo?.trim() || null,
+      valor: form.valor === "" ? null : Number(form.valor),
+      cidade: form.cidade?.trim() || null,
+      bairro: form.bairro?.trim() || null,
+      endereco: form.endereco?.trim() || null,
+      descricao: form.descricao?.trim() || null,
+      status: form.status || "disponivel",
+
+      // ✅ aqui é o correto (UUID)
+      cadastrado_por_uuid: session.user.id,
+    };
+
+    const { error } = await supabase.from("imoveis").insert([payload]);
 
     setLoading(false);
 
     if (error) {
-      setMsg("Erro: " + error.message);
+      setMsg("Erro ao salvar: " + error.message);
       return;
     }
 
-    setMsg("Imóvel salvo com sucesso");
-
-    setForm({
+    setMsg("Imóvel salvo com sucesso!");
+    setForm((p) => ({
+      ...p,
       titulo: "",
       tipo: "",
       valor: "",
       cidade: "",
       bairro: "",
       endereco: "",
+      descricao: "",
       status: "disponivel",
-    });
+    }));
 
-    carregarImoveis();
+    await carregarImoveis();
   }
 
   async function excluir(id) {
+    if (!confirm("Tem certeza que deseja excluir este imóvel?")) return;
 
-    if (!confirm("Excluir imóvel?")) return;
+    setLoading(true);
+    setMsg("");
 
-    await supabase
-      .from("imoveis")
-      .delete()
-      .eq("id", id);
+    const { error } = await supabase.from("imoveis").delete().eq("id", id);
 
-    carregarImoveis();
+    setLoading(false);
+
+    if (error) {
+      setMsg("Erro ao excluir: " + error.message);
+      return;
+    }
+
+    setMsg("Imóvel excluído.");
+    await carregarImoveis();
   }
 
-  async function mudarStatus(id, status) {
+  async function mudarStatus(id, novoStatus) {
+    setLoading(true);
+    setMsg("");
 
-    await supabase
+    const { error } = await supabase
       .from("imoveis")
-      .update({ status })
+      .update({ status: novoStatus })
       .eq("id", id);
 
-    carregarImoveis();
+    setLoading(false);
+
+    if (error) {
+      setMsg("Erro ao atualizar status: " + error.message);
+      return;
+    }
+
+    setMsg("Status atualizado para: " + novoStatus);
+    await carregarImoveis();
   }
 
+  // ---------------------------
+  // Filtros
+  // ---------------------------
+  const itensFiltrados = useMemo(() => {
+    const t = filtroTexto.trim().toLowerCase();
+    return (itens || []).filter((x) => {
+      const okStatus = filtroStatus ? (x.status || "").toLowerCase() === filtroStatus : true;
+      if (!t) return okStatus;
+
+      const blob = [
+        x.codigo,
+        x.titulo,
+        x.tipo,
+        x.cidade,
+        x.bairro,
+        x.endereco,
+        x.descricao,
+        x.status,
+        nomesUsuarios[x.cadastrado_por_uuid],
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return okStatus && blob.includes(t);
+    });
+  }, [itens, filtroTexto, filtroStatus, nomesUsuarios]);
+
+  // ---------------------------
+  // UI
+  // ---------------------------
   return (
-    <div style={{ marginBottom: 12 }}>
-  <b>Logado como:</b> {usuarioNome || "..."}
-  <div style={{ marginTop: 8, display: "flex", gap: 10 }}>
-    <button onClick={() => router.push("/signup")}>Cadastrar usuário</button>
-    <button onClick={sair}>Sair</button>
-  </div>
-</div>
+    <div style={{ padding: 24, fontFamily: "Arial, sans-serif", maxWidth: 1100, margin: "0 auto" }}>
+      <h1 style={{ marginBottom: 6 }}>Painel Admin — Orla Santos Imóveis</h1>
 
-    <div style={{ padding: 30, fontFamily: "Arial" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <div>
+          <b>Logado como:</b> {usuarioNome || "..."}
+        </div>
 
-      <h1>Painel Admin — Orla Santos Imóveis</h1>
-
-      <div style={{ marginBottom: 20 }}>
-        Logado como: <b>{usuarioNome || "..."}</b>
-      </div>
-
-      <form onSubmit={salvar}>
-
-        <h2>Cadastrar imóvel</h2>
-
-        <input
-          placeholder="Título"
-          value={form.titulo}
-          onChange={(e) => onChange("titulo", e.target.value)}
-        /><br /><br />
-
-        <input
-          placeholder="Tipo"
-          value={form.tipo}
-          onChange={(e) => onChange("tipo", e.target.value)}
-        /><br /><br />
-
-        <input
-          placeholder="Valor"
-          value={form.valor}
-          onChange={(e) => onChange("valor", e.target.value)}
-        /><br /><br />
-
-        <input
-          placeholder="Cidade"
-          value={form.cidade}
-          onChange={(e) => onChange("cidade", e.target.value)}
-        /><br /><br />
-
-        <input
-          placeholder="Bairro"
-          value={form.bairro}
-          onChange={(e) => onChange("bairro", e.target.value)}
-        /><br /><br />
-
-        <input
-          placeholder="Endereço"
-          value={form.endereco}
-          onChange={(e) => onChange("endereco", e.target.value)}
-        /><br /><br />
-
-        <select
-          value={form.status}
-          onChange={(e) => onChange("status", e.target.value)}
-        >
-          {STATUS_OPCOES.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-
-        <br /><br />
-
-        <button disabled={loading}>
-          {loading ? "Salvando..." : "Salvar imóvel"}
+        <button onClick={() => router.push("/signup")} disabled={loading}>
+          Cadastrar usuário
         </button>
 
-      </form>
+        <button onClick={sair} disabled={loading}>
+          Sair
+        </button>
 
-      <hr />
-
-      <h2>Imóveis cadastrados</h2>
-
-      <table border="1" cellPadding="8">
-
-        <thead>
-          <tr>
-          <th>Cadastrado por</th>
-            <th>Código</th>
-            <th>Título</th>
-            <th>Cidade</th>
-            <th>Valor</th>
-            <th>Status</th>
-            <th>Ações</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          
-<td>{nomesUsuarios[i.cadastrado_por_uuid] || "-"}</td>
-          {itens.map((i) => (
-
-            <tr key={i.id}>
-  <td>{i.codigo}</td>
-  <td>{i.titulo}</td>
-  <td>{i.cidade}</td>
-  <td>{brl(i.valor)}</td>
-  <td>{nomesUsuarios[i.cadastrado_por_uuid] || "-"}</td>
-  ...
-</tr>
-              <td>
-
-                <select
-                  value={i.status}
-                  onChange={(e) =>
-                    mudarStatus(i.id, e.target.value)
-                  }
-                >
-                  {STATUS_OPCOES.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-
-              </td>
-
-              <td>
-                <button onClick={() => excluir(i.id)}>
-                  Excluir
-                </button>
-              </td>
-
-            </tr>
-
-          ))}
-
-        </tbody>
-
-      </table>
-
-      <div style={{ marginTop: 20 }}>
-        {msg}
+        <div style={{ marginLeft: "auto", color: "#555" }}>
+          {loading ? "Carregando..." : "Pronto."}{" "}
+          {msg ? <span style={{ marginLeft: 10, fontWeight: 700 }}>{msg}</span> : null}
+        </div>
       </div>
 
+      {/* FORM */}
+      <form onSubmit={salvar} style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, marginBottom: 18 }}>
+        <h2 style={{ marginTop: 0 }}>Cadastrar imóvel</h2>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+          <label>
+            Título*<br />
+            <input value={form.titulo} onChange={(e) => onChange("titulo", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label>
+            Tipo<br />
+            <input value={form.tipo} onChange={(e) => onChange("tipo", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label>
+            Valor<br />
+            <input value={form.valor} onChange={(e) => onChange("valor", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label>
+            Status<br />
+            <select value={form.status} onChange={(e) => onChange("status", e.target.value)} style={{ width: "100%" }}>
+              {STATUS_OPCOES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Cidade<br />
+            <input value={form.cidade} onChange={(e) => onChange("cidade", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label>
+            Bairro<br />
+            <input value={form.bairro} onChange={(e) => onChange("bairro", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label style={{ gridColumn: "span 2" }}>
+            Endereço<br />
+            <input value={form.endereco} onChange={(e) => onChange("endereco", e.target.value)} style={{ width: "100%" }} />
+          </label>
+
+          <label style={{ gridColumn: "span 4" }}>
+            Descrição<br />
+            <textarea value={form.descricao} onChange={(e) => onChange("descricao", e.target.value)} style={{ width: "100%", minHeight: 80 }} />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+          <button type="submit" disabled={loading} style={{ padding: "10px 14px" }}>
+            {loading ? "Salvando..." : "Salvar imóvel"}
+          </button>
+          <button type="button" disabled={loading} onClick={carregarImoveis} style={{ padding: "10px 14px" }}>
+            Recarregar lista
+          </button>
+        </div>
+      </form>
+
+      {/* FILTROS */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+        <input
+          placeholder="Buscar por código, título, cidade, bairro, status, cadastrador..."
+          value={filtroTexto}
+          onChange={(e) => setFiltroTexto(e.target.value)}
+          style={{ flex: 1, padding: 10 }}
+        />
+        <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} style={{ padding: 10 }}>
+          <option value="">Todos os status</option>
+          {STATUS_OPCOES.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* LISTA */}
+      <h2 style={{ marginTop: 0 }}>Imóveis cadastrados ({itensFiltrados.length})</h2>
+
+      <div style={{ overflowX: "auto", border: "1px solid #ddd", borderRadius: 10 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <thead>
+            <tr style={{ background: "#f6f6f6" }}>
+              <th style={th}>Código</th>
+              <th style={th}>Título</th>
+              <th style={th}>Tipo</th>
+              <th style={th}>Cidade</th>
+              <th style={th}>Bairro</th>
+              <th style={th}>Valor</th>
+              <th style={th}>Status</th>
+              <th style={th}>Cadastrado por</th>
+              <th style={th}>Ações</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {itensFiltrados.map((x) => (
+              <tr key={x.id}>
+                <td style={tdMono}>{x.codigo}</td>
+                <td style={td}>{x.titulo}</td>
+                <td style={td}>{x.tipo || "-"}</td>
+                <td style={td}>{x.cidade || "-"}</td>
+                <td style={td}>{x.bairro || "-"}</td>
+                <td style={td}>{x.valor != null ? brl(x.valor) : "-"}</td>
+                <td style={td}>{x.status || "-"}</td>
+                <td style={td}>{nomesUsuarios[x.cadastrado_por_uuid] || "-"}</td>
+
+                <td style={td}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <select
+                      value={x.status || "disponivel"}
+                      onChange={(e) => mudarStatus(x.id, e.target.value)}
+                      disabled={loading}
+                    >
+                      {STATUS_OPCOES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+
+                    <button onClick={() => excluir(x.id)} disabled={loading} style={{ padding: "6px 10px" }}>
+                      Excluir
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+
+            {itensFiltrados.length === 0 ? (
+              <tr>
+                <td style={{ padding: 16 }} colSpan={9}>
+                  Nenhum imóvel encontrado.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: 14, color: "#666" }}>
+        ✅ Cadastro só para usuários logados. Se quiser, no próximo passo eu fecho o banco (RLS) para impedir inserts sem login.
+      </div>
     </div>
   );
 }
+
+const th = {
+  textAlign: "left",
+  padding: "10px 8px",
+  borderBottom: "1px solid #ddd",
+  whiteSpace: "nowrap",
+};
+
+const td = {
+  padding: "10px 8px",
+  borderBottom: "1px solid #eee",
+  verticalAlign: "top",
+};
+
+const tdMono = {
+  ...td,
+  fontFamily: "monospace",
+  fontSize: 12,
+  whiteSpace: "nowrap",
+};
