@@ -18,6 +18,45 @@ function brl(v) {
 
 export default function Admin() {
 
+  import { useRouter } from "next/router";
+// ... (o resto permanece)
+
+export default function Admin() {
+  const router = useRouter();
+  const [usuarioNome, setUsuarioNome] = useState("");
+
+  useEffect(() => {
+    async function init() {
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session;
+
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      // busca nome na tabela usuarios
+      const userId = session.user.id;
+      const { data: perfil } = await supabase
+        .from("usuarios")
+        .select("nome")
+        .eq("id", userId)
+        .single();
+
+      setUsuarioNome(perfil?.nome || session.user.email || "...");
+      await carregar();
+    }
+
+    init();
+  }, [router]);
+
+  async function sair() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
+  // ... resto do seu código
+
   const [usuarioNome, setUsuarioNome] = useState("");
   const [usuarioId, setUsuarioId] = useState("");
 
@@ -161,6 +200,14 @@ export default function Admin() {
   }
 
   return (
+    <div style={{ marginBottom: 12 }}>
+  <b>Logado como:</b> {usuarioNome || "..."}
+  <div style={{ marginTop: 8, display: "flex", gap: 10 }}>
+    <button onClick={() => router.push("/signup")}>Cadastrar usuário</button>
+    <button onClick={sair}>Sair</button>
+  </div>
+</div>
+
     <div style={{ padding: 30, fontFamily: "Arial" }}>
 
       <h1>Painel Admin — Orla Santos Imóveis</h1>
